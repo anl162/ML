@@ -77,7 +77,10 @@ val_ds = (val_ds
 data_augmentation = tf.keras.Sequential([
     tf.keras.layers.RandomFlip("horizontal"),
     tf.keras.layers.RandomRotation(0.1),
-    tf.keras.layers.RandomZoom(0.1)
+    tf.keras.layers.RandomZoom(0.1),
+    tf.keras.layers.RandomContrast(0.2),
+    tf.keras.layers.RandomBrightness(factor=0.2),
+    tf.keras.layers.RandomTranslation(0.1, 0.1)
 ])
 
 base_model = tf.keras.applications.ResNet50(
@@ -94,14 +97,19 @@ model = tf.keras.Sequential([
     data_augmentation,
     base_model,
     tf.keras.layers.GlobalAveragePooling2D(),
-    tf.keras.layers.Dense(128, activation="relu", kernel_regularizer=tf.keras.regularizers.l2(1e-5)),
-    tf.keras.layers.Dropout(0.5),
+
+    #Dense Block with BatchNorm + Dropout
+    tf.keras.layers.Dense(64, activation="relu", kernel_regularizer=tf.keras.regularizers.l2(1e-4)),
+    tf.keras.layers.BatchNormalization(),
+    tf.keras.layers.Activation("relu"),
+    tf.keras.layers.Dropout(0.6),
+
     tf.keras.layers.Dense(1, activation="sigmoid")  # binary classification
 ])
 
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(1e-4),
-    loss="binary_crossentropy",
+    optimizer=tf.keras.optimizers.Adam(1e-6),
+    loss= tf.keras.losses.BinaryCrossentropy(label_smoothing = 0.1),
     metrics=[tf.keras.metrics.AUC(name="auc"), "accuracy"]
 
 )
@@ -132,7 +140,7 @@ lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
 base_model.trainable = False
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=3e-4),
-    loss="binary_crossentropy",
+    loss= tf.keras.losses.BinaryCrossentropy(label_smoothing = 0.1),
     metrics=[tf.keras.metrics.AUC(name="auc"), "accuracy"]
 )
 print("Stage 1: Training only top layers...")
@@ -146,7 +154,7 @@ for layer in base_model.layers[-20:]:
 
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
-    loss="binary_crossentropy",
+    loss= tf.keras.losses.BinaryCrossentropy(label_smoothing = 0.1),
     metrics=[tf.keras.metrics.AUC(name="auc"), "accuracy"]
 )
 print("Stage 2: Fine-tuning last 20 layers...")
