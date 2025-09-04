@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Image Detector</title>
+
+  <!-- Load CSS from Flask static folder -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+
+  <!-- Font Awesome for icon -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <div class="upload-container">
+    <form method="POST" enctype="multipart/form-data" action="/upload">
+      
+      <!-- Hidden file input -->
+      <input type="file" id="imageUpload" name="image_file" accept="image/*" hidden>
+      <!-- Title -->
+      <p style="text-align:center; font-weight:600; font-size:50px; margin-top:20px;">
+        AI Image Detector
+      </p>
+
+      <!-- Image preview (moved above buttons) -->
+      <div id="preview" style="text-align:center; margin-bottom:15px;"></div>
+
+      <!-- Custom styled button -->
+      <label for="imageUpload" class="upload-btn">
+        <i class="fa fa-upload"></i>
+        Upload an Image
+      </label><br>
+
+      <!-- Submit button -->
+      <button type="submit" class="submit-btn">
+        <i class="fa fa-paper-plane"></i>
+        Submit
+      </button>
+    </form>
+  </div>
+
+  <!-- JS for preview -->
+  <script>
+    const fileInput = document.getElementById("imageUpload");
+    const preview = document.getElementById("preview");
+
+    fileInput.addEventListener("change", () => {
+      preview.innerHTML = ""; // clear previous
+      const file = fileInput.files[0];
+      if (file) {
+        const img = document.createElement("img");
+        img.src = URL.createObjectURL(file);
+        img.style.maxWidth = "250px";
+        img.style.marginTop = "15px";
+        img.style.borderRadius = "12px";
+        img.style.boxShadow = "0 4px 10px rgba(0,0,0,0.2)";
+        preview.appendChild(img);
+      }
+    });
+  </script>
+</body>
+</html>
