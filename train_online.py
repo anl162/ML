@@ -22,7 +22,7 @@ df = pd.read_csv(os.path.join(path, "train.csv"))
 y = df["label"].values # 0 or 1
 X = df['file_name'].values
 
-base_dir = "/Users/ansonlin/Desktop/SPIS/archive"
+base_dir = path
 X = df['file_name'].apply(lambda fn: os.path.join(base_dir, str(fn).strip())).values
 
 x_train, x_temp, y_train, y_temp = train_test_split(
@@ -49,7 +49,7 @@ def preprocess_image(file_path, label):
 # =============================
 # 3. TF Datasets
 # =============================
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 
 train_ds = tf.data.Dataset.from_tensor_slices((x_train, y_train))
 test_ds = tf.data.Dataset.from_tensor_slices((x_test, y_test))
@@ -57,7 +57,7 @@ val_ds = tf.data.Dataset.from_tensor_slices((x_val, y_val))
 
 train_ds = (train_ds
             .map(preprocess_image, num_parallel_calls=tf.data.AUTOTUNE)
-            .shuffle(1000)
+            .shuffle(5000)
             .batch(BATCH_SIZE)
             .prefetch(tf.data.AUTOTUNE))
 
@@ -75,12 +75,11 @@ val_ds = (val_ds
 # 4. Model (Transfer Learning)
 # =============================
 data_augmentation = tf.keras.Sequential([
-    tf.keras.layers.RandomFlip("horizontal"),
-    tf.keras.layers.RandomRotation(0.1),
-    tf.keras.layers.RandomZoom(0.1),
-    tf.keras.layers.RandomContrast(0.2),
-    tf.keras.layers.RandomBrightness(factor=0.2),
-    tf.keras.layers.RandomTranslation(0.1, 0.1)
+    tf.keras.layers.RandomFlip("horizontal_and_vertical"),
+    tf.keras.layers.RandomRotation(0.4),
+    tf.keras.layers.RandomZoom(0.4),
+    tf.keras.layers.RandomContrast(0.5),
+    tf.keras.layers.RandomBrightness(0.3)
 ])
 
 base_model = tf.keras.applications.ResNet50(
@@ -88,31 +87,16 @@ base_model = tf.keras.applications.ResNet50(
     include_top=False,
     input_shape=(160,160,3)
 )
-base_model.trainable = True
-for layer in base_model.layers[:-20]:  # freeze all but last 20 layers
-    layer.trainable = False
-
 
 model = tf.keras.Sequential([
     data_augmentation,
     base_model,
     tf.keras.layers.GlobalAveragePooling2D(),
-
-    #Dense Block with BatchNorm + Dropout
-    tf.keras.layers.Dense(64, activation="relu", kernel_regularizer=tf.keras.regularizers.l2(1e-4)),
+    tf.keras.layers.Dense(128, activation="relu", kernel_regularizer=tf.keras.regularizers.l2(0.005)),
     tf.keras.layers.BatchNormalization(),
-    tf.keras.layers.Activation("relu"),
-    tf.keras.layers.Dropout(0.6),
-
-    tf.keras.layers.Dense(1, activation="sigmoid")  # binary classification
+    tf.keras.layers.Dropout(0.7),
+    tf.keras.layers.Dense(1, activation="sigmoid")
 ])
-
-model.compile(
-    optimizer=tf.keras.optimizers.Adam(1e-6),
-    loss= tf.keras.losses.BinaryCrossentropy(label_smoothing = 0.1),
-    metrics=[tf.keras.metrics.AUC(name="auc"), "accuracy"]
-
-)
 
 from sklearn.utils.class_weight import compute_class_weight
 
@@ -128,7 +112,7 @@ class_weights = dict(enumerate(class_weights))
 # =============================
 from tensorflow.keras.callbacks import EarlyStopping
 
-early_stop = EarlyStopping(monitor='val_loss', patience=2, restore_best_weights=True)
+early_stop = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
 
 lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
     initial_learning_rate=3e-4,
@@ -136,33 +120,50 @@ lr_schedule = tf.keras.optimizers.schedules.CosineDecay(
     alpha=1e-6
 )
 
+schedule = tf.keras.optimizers.schedules.ExponentialDecay(
+    initial_learning_rate=3e-4,
+    decay_steps=1000,
+    decay_rate=0.9,
+)
+
+
+reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+    monitor="val_loss", factor=0.5, patience=2, min_lr=1e-7
+)
+
+checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(
+    "ai_detector_checkpoint.keras",  # filename
+    save_best_only=True,             # only save the best based on `monitor`
+    monitor="val_loss",
+    mode="min",
+    verbose=1
+)
+
 
 base_model.trainable = False
 model.compile(
     optimizer=tf.keras.optimizers.Adam(learning_rate=3e-4),
-    loss= tf.keras.losses.BinaryCrossentropy(label_smoothing = 0.1),
+    loss=tf.keras.losses.BinaryCrossentropy(label_smoothing=0.1),
     metrics=[tf.keras.metrics.AUC(name="auc"), "accuracy"]
 )
 print("Stage 1: Training only top layers...")
-model.fit(train_ds, validation_data=val_ds, epochs=5, callbacks=[early_stop])
+history1 = model.fit(train_ds, validation_data=val_ds, epochs=3, callbacks=[early_stop, reduce_lr, checkpoint_cb])
 
 
-for layer in base_model.layers[:-20]:
-    layer.trainable = False
-for layer in base_model.layers[-20:]:
+for layer in base_model.layers[:-10]:
     layer.trainable = True
 
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(learning_rate=lr_schedule),
-    loss= tf.keras.losses.BinaryCrossentropy(label_smoothing = 0.1),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
+    loss=tf.keras.losses.BinaryCrossentropy(label_smoothing=0.1),
     metrics=[tf.keras.metrics.AUC(name="auc"), "accuracy"]
 )
-print("Stage 2: Fine-tuning last 20 layers...")
-history = model.fit(
+print("Stage 2: Fine-tuning last 10 layers...")
+history2 = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs=15,
-    callbacks=[early_stop],
+    callbacks=[early_stop, reduce_lr, checkpoint_cb],
     class_weight=class_weights
 )
 
@@ -221,6 +222,15 @@ from sklearn.metrics import classification_report, confusion_matrix
 print(classification_report(y_test, predicted_labels))
 print(confusion_matrix(y_test, predicted_labels))
 
+def combine_history(h1, h2):
+    combined = {}
+    for h in [h1, h2]:
+        for k,v in h.history.items():
+            combined.setdefault(k, []).extend(v)
+    return combined
+
+history = combine_history(history1, history2)
+
 def plot_history(history):
     plt.figure(figsize=(18,5))
 
@@ -246,3 +256,8 @@ def plot_history(history):
     plt.title("AUC")
 
     plt.show()
+
+plot_history(history)
+
+print(classification_report(y_test, predicted_labels))
+print(confusion_matrix(y_test, predicted_labels))
