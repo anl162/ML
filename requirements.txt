@@ -119,5 +119,9 @@ wcwidth==0.2.13
 webcolors==24.11.1
 webencodings==0.5.1
 websocket-client==1.8.0
+
+# --- runtime / training dependencies (added) ---
+tensorflow==2.20.0   # bundles Keras 3.11.x, the version ai_detector_model.h5 was saved with
+kagglehub            # only used by train_online.py to download the dataset
 flask
 gunicorn
